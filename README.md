@@ -17,6 +17,11 @@ A free and open-source WHMCS Addon Module that replaces Google reCAPTCHA with [C
 - **Advanced Selectors**: Define custom jQuery selectors to inject the widget into ANY form on any theme without editing template files.
 - **Smarty Tag Support**: Use `{display_turnstile}` in your `.tpl` files for manual placement.
 
+## Compatibility
+
+- Tested target: **WHMCS 8.13.1**
+- Runtime target: **PHP 8.2.29** with **ionCube PHP Loader v14.0.0**
+
 ## Installation
 
 1. Download the repository.
