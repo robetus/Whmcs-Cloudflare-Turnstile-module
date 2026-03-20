@@ -1,83 +1,218 @@
 <?php
 
+declare(strict_types=1);
+
 use WHMCS\Database\Capsule;
 
-if (!defined("WHMCS")) {
-    die("This file cannot be accessed directly");
+if (!defined('WHMCS')) {
+    die('This file cannot be accessed directly');
 }
 
-function megabre_turnstile_verify($response)
+function megabre_turnstile_get_setting(string $name): string
 {
-    $secretKey = Capsule::table('tbladdonmodules')->where('module', 'megabre_turnstile')->where('setting', 'secret_key')->value('value');
-    if (!$secretKey || !$response) {
+    $value = Capsule::table('tbladdonmodules')
+        ->where('module', 'megabre_turnstile')
+        ->where('setting', $name)
+        ->value('value');
+
+    return is_string($value) ? $value : '';
+}
+
+function megabre_turnstile_is_enabled(string $pageSetting): bool
+{
+    return megabre_turnstile_get_setting($pageSetting) === 'on';
+}
+
+function megabre_turnstile_get_site_key(): string
+{
+    return megabre_turnstile_get_setting('site_key');
+}
+
+function megabre_turnstile_escape(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+function megabre_turnstile_render_widget_html(string $siteKey, string $theme): string
+{
+    return sprintf(
+        '<div class="cf-turnstile megabre-turnstile-widget" data-sitekey="%s" data-theme="%s" style="margin: 15px 0;"></div>',
+        megabre_turnstile_escape($siteKey),
+        megabre_turnstile_escape($theme)
+    );
+}
+
+function megabre_turnstile_verify(?string $response): bool
+{
+    $secretKey = megabre_turnstile_get_setting('secret_key');
+    if ($secretKey === '' || empty($response)) {
         return false;
     }
 
     $remoteIp = isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '';
 
     $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, 'https://challenges.cloudflare.com/turnstile/v0/siteverify');
-    curl_setopt($ch, CURLOPT_POST, 1);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
-        'secret' => $secretKey,
-        'response' => $response,
-        'remoteip' => $remoteIp,
-    ]));
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-
-    $result = curl_exec($ch);
-    if ($result === false) {
-        curl_close($ch);
+    if ($ch === false) {
         return false;
     }
+
+    curl_setopt_array($ch, [
+        CURLOPT_URL => 'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => http_build_query([
+            'secret' => $secretKey,
+            'response' => $response,
+            'remoteip' => $remoteIp,
+        ]),
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 10,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+    ]);
+
+    $result = curl_exec($ch);
     curl_close($ch);
+
+    if (!is_string($result) || $result === '') {
+        return false;
+    }
 
     $json = json_decode($result, true);
 
     return is_array($json) && !empty($json['success']);
 }
 
-function megabre_turnstile_get_setting($name)
+function megabre_turnstile_get_page_context(array $vars): array
 {
-    return Capsule::table('tbladdonmodules')->where('module', 'megabre_turnstile')->where('setting', $name)->value('value');
+    return [
+        'templatefile' => isset($vars['templatefile']) ? (string) $vars['templatefile'] : '',
+        'filename' => isset($vars['filename']) ? (string) $vars['filename'] : '',
+        'template' => isset($vars['template']) ? (string) $vars['template'] : '',
+    ];
 }
 
-function megabre_turnstile_is_enabled($pageSetting)
+function megabre_turnstile_should_inject(array $pageContext): bool
 {
-    return megabre_turnstile_get_setting($pageSetting) === 'on';
+    $templatefile = $pageContext['templatefile'];
+    $filename = $pageContext['filename'];
+
+    if ($templatefile === 'login' && megabre_turnstile_is_enabled('enable_login')) {
+        return true;
+    }
+
+    if (in_array($templatefile, ['clientregister', 'register'], true) && megabre_turnstile_is_enabled('enable_register')) {
+        return true;
+    }
+
+    if (
+        in_array($templatefile, ['password-reset-container', 'password-reset', 'pwreset'], true)
+        && megabre_turnstile_is_enabled('enable_pwreset')
+    ) {
+        return true;
+    }
+
+    if (($templatefile === 'contact' || $filename === 'contact') && megabre_turnstile_is_enabled('enable_contact')) {
+        return true;
+    }
+
+    if (
+        in_array($templatefile, ['supportticketsubmit-stepone', 'supportticketsubmit-steptwo', 'submitticket'], true)
+        && megabre_turnstile_is_enabled('enable_ticket')
+    ) {
+        return true;
+    }
+
+    if (
+        (strpos($templatefile, 'checkout') !== false || $filename === 'cart' || $templatefile === 'viewcart')
+        && megabre_turnstile_is_enabled('enable_cart')
+    ) {
+        return true;
+    }
+
+    return false;
 }
 
-function megabre_turnstile_get_site_key()
+function megabre_turnstile_get_targets(array $pageContext): array
 {
-    return megabre_turnstile_get_setting('site_key');
+    $templatefile = $pageContext['templatefile'];
+    $filename = $pageContext['filename'];
+    $targets = [];
+
+    if ($templatefile === 'login' && megabre_turnstile_is_enabled('enable_login')) {
+        $custom = trim(megabre_turnstile_get_setting('custom_login_sel'));
+        $targets[] = [
+            'selector' => $custom !== '' ? $custom : 'form[action*="dologin"] button[type="submit"], form[action*="login"] button[type="submit"], #login',
+            'mode' => 'before',
+        ];
+    }
+
+    if (in_array($templatefile, ['clientregister', 'register'], true) && megabre_turnstile_is_enabled('enable_register')) {
+        $custom = trim(megabre_turnstile_get_setting('custom_register_sel'));
+        $targets[] = [
+            'selector' => $custom !== '' ? $custom : '#btnRegister, form[action*="register"] button[type="submit"], form[action*="register"] input[type="submit"]',
+            'mode' => 'before',
+        ];
+    }
+
+    if (
+        in_array($templatefile, ['password-reset-container', 'password-reset', 'pwreset'], true)
+        && megabre_turnstile_is_enabled('enable_pwreset')
+    ) {
+        $custom = trim(megabre_turnstile_get_setting('custom_pwreset_sel'));
+        $targets[] = [
+            'selector' => $custom !== '' ? $custom : 'form[action*="pwreset"] button[type="submit"], form[action*="password/reset"] button[type="submit"], form[action*="pwreset"] input[type="submit"]',
+            'mode' => 'before',
+        ];
+    }
+
+    if (($templatefile === 'contact' || $filename === 'contact') && megabre_turnstile_is_enabled('enable_contact')) {
+        $custom = trim(megabre_turnstile_get_setting('custom_contact_sel'));
+        $targets[] = [
+            'selector' => $custom !== '' ? $custom : 'form[action*="contact"] button[type="submit"], form[action*="contact"] input[type="submit"]',
+            'mode' => 'before',
+        ];
+    }
+
+    if (
+        in_array($templatefile, ['supportticketsubmit-stepone', 'supportticketsubmit-steptwo', 'submitticket'], true)
+        && megabre_turnstile_is_enabled('enable_ticket')
+    ) {
+        $custom = trim(megabre_turnstile_get_setting('custom_ticket_sel'));
+        $targets[] = [
+            'selector' => $custom !== '' ? $custom : '#openTicketSubmit, form[action*="submitticket"] button[type="submit"], form[action*="submitticket"] input[type="submit"]',
+            'mode' => 'before',
+        ];
+    }
+
+    if (
+        (strpos($templatefile, 'checkout') !== false || $filename === 'cart' || $templatefile === 'viewcart')
+        && megabre_turnstile_is_enabled('enable_cart')
+    ) {
+        $custom = trim(megabre_turnstile_get_setting('custom_cart_sel'));
+        $targets[] = [
+            'selector' => $custom !== '' ? $custom : '#btnCompleteOrder, button[type="submit"][name="checkout"], [data-role="complete-order"], .checkout-submit button[type="submit"], form[action*="cart"] button[type="submit"]',
+            'mode' => 'before',
+        ];
+    }
+
+    return $targets;
 }
 
-function megabre_turnstile_render_widget_html($siteKey, $theme)
+function megabre_turnstile_validation_error(bool $array = false)
 {
-    $safeSiteKey = htmlspecialchars((string) $siteKey, ENT_QUOTES, 'UTF-8');
-    $safeTheme = htmlspecialchars((string) $theme, ENT_QUOTES, 'UTF-8');
+    $message = 'Turnstile verification failed. Please try again.';
 
-    return '<div class="cf-turnstile" data-sitekey="' . $safeSiteKey . '" data-theme="' . $safeTheme . '" style="margin: 15px 0;"></div>';
+    return $array ? [$message] : $message;
 }
 
-function megabre_turnstile_js_before($selector, $html)
-{
-    return 'var _mtTarget=jQuery(' . json_encode((string) $selector) . ');if(_mtTarget.length){_mtTarget.first().before(' . json_encode((string) $html) . ');}';
-}
-
-/**
- * Register Smarty function: {display_turnstile}
- * Compatible with WHMCS 8.13.x.
- */
-add_hook('ClientAreaPage', 1, function ($vars) {
+add_hook('ClientAreaPage', 1, static function () {
     if (!isset($GLOBALS['smarty']) || !is_object($GLOBALS['smarty']) || !method_exists($GLOBALS['smarty'], 'registerPlugin')) {
         return;
     }
 
-    $GLOBALS['smarty']->registerPlugin('function', 'display_turnstile', function ($params, $smarty) {
+    $GLOBALS['smarty']->registerPlugin('function', 'display_turnstile', static function () {
         $siteKey = megabre_turnstile_get_site_key();
-        if (!$siteKey) {
+        if ($siteKey === '') {
             return '';
         }
 
@@ -87,158 +222,142 @@ add_hook('ClientAreaPage', 1, function ($vars) {
     });
 });
 
-/**
- * Inject Cloudflare Turnstile Script
- */
-add_hook('ClientAreaHeadOutput', 1, function ($vars) {
-    if (!megabre_turnstile_get_site_key()) {
+add_hook('ClientAreaHeadOutput', 1, static function (array $vars) {
+    $siteKey = megabre_turnstile_get_site_key();
+    if ($siteKey === '') {
         return;
     }
 
-    return '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>';
+    if (!megabre_turnstile_should_inject(megabre_turnstile_get_page_context($vars))) {
+        return;
+    }
+
+    return <<<'HTML'
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<style>
+.g-recaptcha,
+#google-recaptcha-domainchecker,
+.recaptcha-container,
+[data-google-recaptcha],
+[data-recaptcha],
+div[class*="captcha"] .g-recaptcha {
+    display: none !important;
+}
+.megabre-turnstile-container {
+    display: block;
+    width: 100%;
+    margin: 15px 0;
+}
+.megabre-turnstile-widget {
+    display: block !important;
+}
+</style>
+HTML;
 });
 
-/**
- * Inject Widget into Forms via Footer JS
- */
-add_hook('ClientAreaFooterOutput', 1, function ($vars) {
+add_hook('ClientAreaFooterOutput', 1, static function (array $vars) {
     $siteKey = megabre_turnstile_get_site_key();
-    if (!$siteKey) {
+    if ($siteKey === '') {
         return;
     }
 
-    $templatefile = isset($vars['templatefile']) ? (string) $vars['templatefile'] : '';
-    $filename = isset($vars['filename']) ? (string) $vars['filename'] : '';
+    $pageContext = megabre_turnstile_get_page_context($vars);
+    if (!megabre_turnstile_should_inject($pageContext)) {
+        return;
+    }
+
+    $targets = megabre_turnstile_get_targets($pageContext);
+    if ($targets === []) {
+        return;
+    }
 
     $theme = megabre_turnstile_get_setting('theme') ?: 'auto';
-    $widgetHtml = megabre_turnstile_render_widget_html($siteKey, $theme);
+    $widgetHtml = '<div class="megabre-turnstile-container">' . megabre_turnstile_render_widget_html($siteKey, $theme) . '</div>';
 
-    $css = '<style>
-        .g-recaptcha, #google-recaptcha-domainchecker, .recaptcha-container { display: none !important; }
-        div[class*="captcha"] { display: none !important; }
-        .cf-turnstile { display: block !important; }
-    </style>';
+    $payload = [
+        'widgetHtml' => $widgetHtml,
+        'targets' => array_values($targets),
+    ];
 
-    $jsCode = '';
+    return '<script>(function(){'
+        . 'var config=' . json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
+        . 'function ensureTurnstileBefore(target){'
+        . 'if(!target||!target.parentNode){return false;}'
+        . 'if(target.previousElementSibling&&target.previousElementSibling.classList&&target.previousElementSibling.classList.contains("megabre-turnstile-container")){return true;}'
+        . 'var wrapper=document.createElement("div");wrapper.innerHTML=config.widgetHtml;var node=wrapper.firstChild;if(!node){return false;}target.parentNode.insertBefore(node,target);'
+        . 'if(window.turnstile&&typeof window.turnstile.render==="function"){var widgets=node.querySelectorAll(".cf-turnstile");for(var i=0;i<widgets.length;i++){if(!widgets[i].firstChild){try{window.turnstile.render(widgets[i]);}catch(e){}}}}'
+        . 'return true;'
+        . '}'
+        . 'function resolveTarget(selector){try{return document.querySelector(selector);}catch(e){return null;}}'
+        . 'function runInject(){for(var i=0;i<config.targets.length;i++){var item=config.targets[i]||{};var target=resolveTarget(item.selector||"");if(target){ensureTurnstileBefore(target);}}}'
+        . 'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",runInject);}else{runInject();}'
+        . 'var observer=new MutationObserver(function(){runInject();});observer.observe(document.documentElement,{childList:true,subtree:true});'
+        . '})();</script>';
+});
 
-    if ($templatefile === 'login' && megabre_turnstile_is_enabled('enable_login')) {
-        $custom = trim((string) megabre_turnstile_get_setting('custom_login_sel'));
-        if ($custom !== '') {
-            $jsCode .= megabre_turnstile_js_before($custom, $widgetHtml);
-        } else {
-            $jsCode .= 'if(jQuery(".megabre-login-wrap").length){var _mtBtn=jQuery(".megabre-login-wrap form button[type=\'submit\']");if(_mtBtn.length){_mtBtn.first().before(' . json_encode($widgetHtml) . ');}}else{var _mtDef=jQuery("form[action*=\'dologin\'] button[type=\'submit\']").closest("div.form-group, div.mb-3");if(_mtDef.length){_mtDef.first().before(' . json_encode($widgetHtml) . ');}}';
-        }
+add_hook('UserLoginVerification', 1, static function () {
+    if (!megabre_turnstile_is_enabled('enable_login')) {
+        return;
     }
 
-    if ($templatefile === 'clientregister' && megabre_turnstile_is_enabled('enable_register')) {
-        $custom = trim((string) megabre_turnstile_get_setting('custom_register_sel'));
-        if ($custom !== '') {
-            $jsCode .= megabre_turnstile_js_before($custom, $widgetHtml);
-        } else {
-            $jsCode .= 'if(jQuery(".megabre-register-wrap").length){var _mtRegBtn=jQuery(".megabre-register-wrap form button[type=\'submit\']");if(_mtRegBtn.length){_mtRegBtn.first().before(' . json_encode($widgetHtml) . ');}}else{var _mtRegDef=jQuery("#btnRegister").closest("div.form-group, div.mb-3");if(_mtRegDef.length){_mtRegDef.first().before(' . json_encode($widgetHtml) . ');}}';
-        }
-    }
-
-    if ($templatefile === 'password-reset-container' && megabre_turnstile_is_enabled('enable_pwreset')) {
-        $custom = trim((string) megabre_turnstile_get_setting('custom_pwreset_sel'));
-        if ($custom !== '') {
-            $jsCode .= megabre_turnstile_js_before($custom, $widgetHtml);
-        } else {
-            $jsCode .= 'var _mtPw=jQuery("form[action*=\'pwreset\'] button[type=\'submit\']").closest("div");if(_mtPw.length){_mtPw.first().before(' . json_encode($widgetHtml) . ');}';
-        }
-    }
-
-    if (($templatefile === 'supportticketsubmit-stepone' || $templatefile === 'supportticketsubmit-steptwo') && megabre_turnstile_is_enabled('enable_ticket')) {
-        $custom = trim((string) megabre_turnstile_get_setting('custom_ticket_sel'));
-        if ($custom !== '') {
-            $jsCode .= megabre_turnstile_js_before($custom, $widgetHtml);
-        } else {
-            $jsCode .= 'var _mtTicket=jQuery("#openTicketSubmit").closest("p, div.form-group");if(_mtTicket.length){_mtTicket.first().before(' . json_encode($widgetHtml) . ');}';
-        }
-    }
-
-    if ($templatefile === 'contact' && megabre_turnstile_is_enabled('enable_contact')) {
-        $custom = trim((string) megabre_turnstile_get_setting('custom_contact_sel'));
-        if ($custom !== '') {
-            $jsCode .= megabre_turnstile_js_before($custom, $widgetHtml);
-        } else {
-            $jsCode .= 'var _mtContact=jQuery("form[action*=\'contact\'] button[type=\'submit\']").closest("p, div.text-center");if(_mtContact.length){_mtContact.first().before(' . json_encode($widgetHtml) . ');}';
-        }
-    }
-
-    if ((strpos($templatefile, 'checkout') !== false || $filename === 'cart') && megabre_turnstile_is_enabled('enable_cart')) {
-        $custom = trim((string) megabre_turnstile_get_setting('custom_cart_sel'));
-        if ($custom !== '') {
-            $jsCode .= megabre_turnstile_js_before($custom, $widgetHtml);
-        } else {
-            $jsCode .= 'var _mtCart=jQuery("#btnCompleteOrder").closest("div");if(_mtCart.length){_mtCart.first().before(' . json_encode($widgetHtml) . ');}';
-        }
-    }
-
-    if ($jsCode !== '') {
-        return $css . '<script>jQuery(function(){' . $jsCode . '});</script>';
+    if (!megabre_turnstile_verify($_POST['cf-turnstile-response'] ?? null)) {
+        return megabre_turnstile_validation_error(false);
     }
 });
 
-/**
- * Validation Hooks
- */
-add_hook('UserLoginVerification', 1, function ($vars) {
-    if (megabre_turnstile_is_enabled('enable_login')) {
-        if (!isset($_POST['cf-turnstile-response']) || !megabre_turnstile_verify($_POST['cf-turnstile-response'])) {
-            return 'Turnstile verification failed. Please try again.';
-        }
-    }
-});
-
-add_hook('ClientDetailsValidation', 1, function ($vars) {
+add_hook('ClientDetailsValidation', 1, static function () {
     if (!isset($_SESSION['uid']) && megabre_turnstile_is_enabled('enable_register')) {
-        if (!isset($_POST['cf-turnstile-response']) || !megabre_turnstile_verify($_POST['cf-turnstile-response'])) {
-            return ['Turnstile verification failed.'];
+        if (!megabre_turnstile_verify($_POST['cf-turnstile-response'] ?? null)) {
+            return megabre_turnstile_validation_error(true);
         }
     }
 });
 
-add_hook('ShoppingCartValidateCheckout', 1, function ($vars) {
-    if (megabre_turnstile_is_enabled('enable_cart')) {
-        if (!isset($_POST['cf-turnstile-response']) || !megabre_turnstile_verify($_POST['cf-turnstile-response'])) {
-            return 'Turnstile verification failed. Please try again.';
-        }
+add_hook('ShoppingCartValidateCheckout', 1, static function () {
+    if (!megabre_turnstile_is_enabled('enable_cart')) {
+        return;
+    }
+
+    if (!megabre_turnstile_verify($_POST['cf-turnstile-response'] ?? null)) {
+        return megabre_turnstile_validation_error(false);
     }
 });
 
-add_hook('TicketOpenValidation', 1, function ($vars) {
-    if (megabre_turnstile_is_enabled('enable_ticket')) {
-        if (!isset($_POST['cf-turnstile-response']) || !megabre_turnstile_verify($_POST['cf-turnstile-response'])) {
-            return 'Turnstile verification failed.';
-        }
+add_hook('TicketOpenValidation', 1, static function () {
+    if (!megabre_turnstile_is_enabled('enable_ticket')) {
+        return;
+    }
+
+    if (!megabre_turnstile_verify($_POST['cf-turnstile-response'] ?? null)) {
+        return megabre_turnstile_validation_error(false);
     }
 });
 
-add_hook('ContactForm', 1, function ($vars) {
-    if (megabre_turnstile_is_enabled('enable_contact')) {
-        if (!isset($_POST['cf-turnstile-response']) || !megabre_turnstile_verify($_POST['cf-turnstile-response'])) {
-            return 'Turnstile verification failed.';
-        }
+add_hook('ContactForm', 1, static function () {
+    if (!megabre_turnstile_is_enabled('enable_contact')) {
+        return;
+    }
+
+    if (!megabre_turnstile_verify($_POST['cf-turnstile-response'] ?? null)) {
+        return megabre_turnstile_validation_error(false);
     }
 });
 
-add_hook('ClientAreaPagePasswordReset', 1, function ($vars) {
+add_hook('ClientAreaPagePasswordReset', 1, static function () {
     if (!megabre_turnstile_is_enabled('enable_pwreset')) {
         return;
     }
 
-    if (!isset($_SERVER['REQUEST_METHOD']) || strtoupper((string) $_SERVER['REQUEST_METHOD']) !== 'POST') {
+    $requestMethod = isset($_SERVER['REQUEST_METHOD']) ? strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
+    if ($requestMethod !== 'POST') {
         return;
     }
 
-    if (!isset($_POST['email'])) {
+    if (!isset($_POST['email']) && !isset($_POST['answer']) && !isset($_POST['code'])) {
         return;
     }
 
-    if (!isset($_POST['cf-turnstile-response']) || !megabre_turnstile_verify($_POST['cf-turnstile-response'])) {
-        return [
-            'errormessage' => 'Turnstile verification failed. Please try again.',
-        ];
+    if (!megabre_turnstile_verify($_POST['cf-turnstile-response'] ?? null)) {
+        return ['errormessage' => 'Turnstile verification failed. Please try again.'];
     }
 });
