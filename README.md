@@ -4,6 +4,7 @@ A free and open-source WHMCS Addon Module that replaces Google reCAPTCHA with [C
 
 ## Features
 
+- Updated to WHMCS 9.0.2 and php 8.2.
 - **seamless Integration**: Works with standard WHMCS themes (Six, Twenty-One) and custom themes.
 - **Admin Dashboard**: Fully custom configuration interface directly within WHMCS Addons.
 - **Page Control**: Enable/Disable Turnstile specifically for:
