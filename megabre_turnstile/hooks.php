@@ -84,10 +84,18 @@ function megabre_turnstile_verify(?string $response): bool
 
 function megabre_turnstile_get_page_context(array $vars): array
 {
+    $action = '';
+    if (isset($_GET['a'])) {
+        $action = strtolower(trim((string) $_GET['a']));
+    } elseif (isset($_POST['a'])) {
+        $action = strtolower(trim((string) $_POST['a']));
+    }
+
     return [
         'templatefile' => isset($vars['templatefile']) ? (string) $vars['templatefile'] : '',
         'filename' => isset($vars['filename']) ? (string) $vars['filename'] : '',
         'template' => isset($vars['template']) ? (string) $vars['template'] : '',
+        'action' => $action,
     ];
 }
 
@@ -95,6 +103,7 @@ function megabre_turnstile_should_inject(array $pageContext): bool
 {
     $templatefile = $pageContext['templatefile'];
     $filename = $pageContext['filename'];
+    $action = $pageContext['action'];
 
     if ($templatefile === 'login' && megabre_turnstile_is_enabled('enable_login')) {
         return true;
@@ -123,7 +132,7 @@ function megabre_turnstile_should_inject(array $pageContext): bool
     }
 
     if (
-        (strpos($templatefile, 'checkout') !== false || $filename === 'cart' || $templatefile === 'viewcart')
+        ($action === 'checkout' || strpos($templatefile, 'checkout') !== false)
         && megabre_turnstile_is_enabled('enable_cart')
     ) {
         return true;
@@ -136,6 +145,7 @@ function megabre_turnstile_get_targets(array $pageContext): array
 {
     $templatefile = $pageContext['templatefile'];
     $filename = $pageContext['filename'];
+    $action = $pageContext['action'];
     $targets = [];
 
     if ($templatefile === 'login' && megabre_turnstile_is_enabled('enable_login')) {
@@ -185,12 +195,12 @@ function megabre_turnstile_get_targets(array $pageContext): array
     }
 
     if (
-        (strpos($templatefile, 'checkout') !== false || $filename === 'cart' || $templatefile === 'viewcart')
+        ($action === 'checkout' || strpos($templatefile, 'checkout') !== false)
         && megabre_turnstile_is_enabled('enable_cart')
     ) {
         $custom = trim(megabre_turnstile_get_setting('custom_cart_sel'));
         $targets[] = [
-            'selector' => $custom !== '' ? $custom : '#btnCompleteOrder, button[type="submit"][name="checkout"], [data-role="complete-order"], .checkout-submit button[type="submit"], form[action*="cart"] button[type="submit"]',
+            'selector' => $custom !== '' ? $custom : '#btnCompleteOrder, button[type="submit"][name="checkout"], [data-role="complete-order"], .checkout-submit button[type="submit"], #frmCheckout button[type="submit"], form[action*="a=checkout"] button[type="submit"]',
             'mode' => 'before',
         ];
     }
@@ -244,9 +254,9 @@ div[class*="captcha"] .g-recaptcha {
     display: none !important;
 }
 .megabre-turnstile-container {
-    display: block;
+    display: inline-block;
     width: 100%;
-    margin: 15px 0;
+    margin: 0;
 }
 .megabre-turnstile-widget {
     display: block !important;

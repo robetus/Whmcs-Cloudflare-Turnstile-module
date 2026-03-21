@@ -132,7 +132,7 @@ function megabre_turnstile_output($vars)
 
         <div class="megabre-card">
             <h3>API Configuration</h3>
-            <p class="megabre-note">Built for WHMCS 9.x and PHP 8.2. For Nexus Cart or a custom theme, you can override the default selectors below.</p>
+            <p class="megabre-note">Built for WHMCS 9.x and PHP 8.2. Turnstile is intended for the checkout step only on cart.php?a=checkout. For Nexus Cart or a custom theme, you can override the default selectors below.</p>
             <div class="megabre-grid">
                 <div class="megabre-field">
                     <label for="megabre-site-key">Site Key</label>
@@ -161,18 +161,18 @@ function megabre_turnstile_output($vars)
                 <div class="megabre-toggle-row"><span>Enable on Password Reset</span><label class="megabre-switch"><input type="checkbox" name="enable_pwreset" ' . ($settings['enable_pwreset'] === 'on' ? 'checked' : '') . '><span class="megabre-slider"></span></label></div>
                 <div class="megabre-toggle-row"><span>Enable on Contact</span><label class="megabre-switch"><input type="checkbox" name="enable_contact" ' . ($settings['enable_contact'] === 'on' ? 'checked' : '') . '><span class="megabre-slider"></span></label></div>
                 <div class="megabre-toggle-row"><span>Enable on Ticket Submit</span><label class="megabre-switch"><input type="checkbox" name="enable_ticket" ' . ($settings['enable_ticket'] === 'on' ? 'checked' : '') . '><span class="megabre-slider"></span></label></div>
-                <div class="megabre-toggle-row"><span>Enable on Shopping Cart / Checkout</span><label class="megabre-switch"><input type="checkbox" name="enable_cart" ' . ($settings['enable_cart'] === 'on' ? 'checked' : '') . '><span class="megabre-slider"></span></label></div>
+                <div class="megabre-toggle-row"><span>Enable on Checkout</span><label class="megabre-switch"><input type="checkbox" name="enable_cart" ' . ($settings['enable_cart'] === 'on' ? 'checked' : '') . '><span class="megabre-slider"></span></label></div>
             </div>
 
             <div class="megabre-card">
                 <h3>Advanced: Custom Selectors</h3>
-                <p class="megabre-help" style="margin-bottom:16px;">Leave these empty to use auto-detection. Fill them only if your custom theme or modified WHMCS 9 checkout needs a specific submit button selector.</p>
+                <p class="megabre-help" style="margin-bottom:16px;">Leave these empty to use auto-detection. Fill them only if your custom theme or modified WHMCS 9 checkout needs a specific checkout submit button selector.</p>
                 <div class="megabre-field"><label>Login Form Selector</label><input type="text" name="custom_login_sel" value="' . megabre_turnstile_admin_escape($settings['custom_login_sel']) . '"></div>
                 <div class="megabre-field"><label>Register Form Selector</label><input type="text" name="custom_register_sel" value="' . megabre_turnstile_admin_escape($settings['custom_register_sel']) . '"></div>
                 <div class="megabre-field"><label>Password Reset Selector</label><input type="text" name="custom_pwreset_sel" value="' . megabre_turnstile_admin_escape($settings['custom_pwreset_sel']) . '"></div>
                 <div class="megabre-field"><label>Contact Form Selector</label><input type="text" name="custom_contact_sel" value="' . megabre_turnstile_admin_escape($settings['custom_contact_sel']) . '"></div>
                 <div class="megabre-field"><label>Ticket Form Selector</label><input type="text" name="custom_ticket_sel" value="' . megabre_turnstile_admin_escape($settings['custom_ticket_sel']) . '"></div>
-                <div class="megabre-field"><label>Cart / Checkout Selector</label><input type="text" name="custom_cart_sel" value="' . megabre_turnstile_admin_escape($settings['custom_cart_sel']) . '"></div>
+                <div class="megabre-field"><label>Checkout Selector</label><input type="text" name="custom_cart_sel" value="' . megabre_turnstile_admin_escape($settings['custom_cart_sel']) . '"></div>
             </div>
         </div>
 
