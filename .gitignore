@@ -1,0 +1,30 @@
+# macOS
+.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Temp / backup files
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# Archives
+*.zip
+*.tar
+*.gz
+
+# Local env / secrets
+.env
+.env.*
+secrets.php
+config.local.php
+
+# OS / misc
+Thumbs.db
